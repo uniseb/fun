@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Void-Tok</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* Blokujemy standardowe przewijanie */
+        }
+
+        /* Ekran startowy (wymagany by odblokować Audio API) */
+        #start-screen {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            z-index: 9999;
+            cursor: pointer;
+        }
+        #start-screen h1 { font-size: 24px; letter-spacing: 2px; text-transform: uppercase; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+
+        /* Kontener aplikacji - scroll snap */
+        #app-container {
+            width: 100vw;
+            height: 100vh;
+            overflow-y: scroll;
+            scroll-snap-type: y mandatory;
+            scrollbar-width: none; /* Ukrywa pasek w Firefox */
+            transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+        #app-container::-webkit-scrollbar { display: none; } /* Ukrywa pasek w Chrome/Safari */
+
+        /* Pojedyncza Rolka */
+        .slide {
+            width: 100vw;
+            height: 100vh;
+            scroll-snap-align: start;
+            position: relative;
+            background: #111;
+        }
+
+        /* Szum wizualny */
+        canvas.visuals {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* Niska rozdzielczość canvasu skalowana w górę daje fajny, glitchowy efekt */
+            image-rendering: pixelated; 
+        }
+
+        /* Interfejs w stylu TikToka */
+        .ui-overlay {
+            position: absolute;
+            bottom: 20px;
+            right: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            z-index: 10;
+        }
+        .icon {
+            font-size: 35px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+            cursor: pointer;
+            text-align: center;
+            transition: transform 0.2s;
+        }
+        .icon:active { transform: scale(0.8); }
+        .icon-label { font-size: 12px; font-weight: bold; margin-top: 5px; }
+
+        .text-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 15px;
+            width: 70%;
+            z-index: 10;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
+        }
+        .username { font-weight: bold; font-size: 18px; margin-bottom: 8px; }
+        .description { font-size: 14px; opacity: 0.9; }
+
+        /* Ekran końcowy po zniszczeniu */
+        #end-screen {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: #fff;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 2s ease-in;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen" onclick="initApp()">
+        <h1>Zacznij przewijać</h1>
+        <p style="margin-top: 10px; font-size: 12px; color: #666;">Dotknij ekranu</p>
+    </div>
+
+    <div id="app-container"></div>
+
+    <div id="end-screen">Wróć do rzeczywistości.</div>
+
+    <script>
+        let audioCtx;
+        let oscillators = [];
+        let animationFrameIds = [];
+        let appDestroyed = false;
+
+        // Inicjalizacja aplikacji po pierwszym kliknięciu
+        function initApp() {
+            document.getElementById('start-screen').style.display = 'none';
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            loadMoreSlides(3); // Załaduj 3 pierwsze slajdy
+            setupInfiniteScroll();
+        }
+
+        // Tworzenie pojedynczego slajdu
+        function createSlide() {
+            const slide = document.createElement('div');
+            slide.className = 'slide';
+
+            // Generowanie fałszywych nazw
+            const usernames = ["@pustka", "@glitch_mind", "@szum_informacyjny", "@błąd_systemu"];
+            const desc = ["nic tu nie ma.", "scrolluj dalej.", "szukasz czegoś?", "to nie ma sensu."];
+
+            slide.innerHTML = `
+                <canvas class="visuals" width="64" height="64"></canvas>
+                <div class="text-overlay">
+                    <div class="username">${usernames[Math.floor(Math.random() * usernames.length)]}</div>
+                    <div class="description">${desc[Math.floor(Math.random() * desc.length)]}</div>
+                </div>
+                <div class="ui-overlay">
+                    <div class="icon" onclick="shatterReality()">❤️<div class="icon-label">0</div></div>
+                    <div class="icon" onclick="shatterReality()">💬<div class="icon-label">0</div></div>
+                    <div class="icon" onclick="shatterReality()">🔖<div class="icon-label">0</div></div>
+                    <div class="icon" onclick="shatterReality()">↗️<div class="icon-label">0</div></div>
+                </div>
+            `;
+
+            document.getElementById('app-container').appendChild(slide);
+
+            const canvas = slide.querySelector('canvas');
+            animateCanvas(canvas);
+        }
+
+        // Proceduralne generowanie szumu na płótnie
+        function animateCanvas(canvas) {
+            if (appDestroyed) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            const id = ctx.createImageData(w, h);
+            const d = id.data;
+
+            // Losowy odcień dla danego slajdu
+            const rOffset = Math.random() * 255;
+            const gOffset = Math.random() * 255;
+            const bOffset = Math.random() * 255;
+
+            function draw() {
+                if (appDestroyed) return;
+                for (let i = 0; i < d.length; i += 4) {
+                    const noise = Math.random() * 255;
+                    d[i] = noise * (rOffset/255);     // R
+                    d[i+1] = noise * (gOffset/255);   // G
+                    d[i+2] = noise * (bOffset/255);   // B
+                    d[i+3] = 255;                     // Alpha
+                }
+                ctx.putImageData(id, 0, 0);
+                animationFrameIds.push(requestAnimationFrame(draw));
+            }
+            draw();
+        }
+
+        // Generowanie niepokojącego dźwięku (Fale Gamma / Szum)
+        function playGlitchAudio() {
+            if (!audioCtx || appDestroyed) return;
+            
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            // Losowa częstotliwość - dudnienie lub wysoki pisk
+            osc.frequency.value = Math.random() > 0.5 ? (30 + Math.random() * 40) : (400 + Math.random() * 1000);
+            osc.type = ['sine', 'square', 'sawtooth'][Math.floor(Math.random() * 3)];
+            
+            gainNode.gain.value = 0.05; // Cicho, żeby nie ogłuszyć
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            osc.start();
+            oscillators.push(osc);
+
+            // Zmień dźwięk co jakiś czas
+            setTimeout(() => {
+                if(!appDestroyed) {
+                    osc.stop();
+                    playGlitchAudio();
+                }
+            }, 1000 + Math.random() * 3000);
+        }
+
+        // Mechanizm nieskończonego przewijania
+        function loadMoreSlides(count) {
+            for (let i = 0; i < count; i++) {
+                createSlide();
+            }
+            // Uruchom nowy dźwięk przy każdym dodaniu slajdów (nawarstwianie się)
+            playGlitchAudio(); 
+        }
+
+        function setupInfiniteScroll() {
+            const container = document.getElementById('app-container');
+            container.addEventListener('scroll', () => {
+                if (container.scrollTop + container.clientHeight >= container.scrollHeight - 100) {
+                    loadMoreSlides(1);
+                }
+            });
+        }
+
+        // THE SHATTER EFFECT - Główna mechanika zniszczenia
+        function shatterReality() {
+            if (appDestroyed) return;
+            appDestroyed = true;
+
+            // 1. Zniszcz UI i Canvany (wybuch na boki)
+            const elements = document.querySelectorAll('.icon, .text-overlay, canvas');
+            elements.forEach(el => {
+                const randomX = (Math.random() - 0.5) * 2000;
+                const randomY = (Math.random() - 0.5) * 2000;
+                const randomRot = (Math.random() - 0.5) * 720;
+                
+                el.style.transition = 'transform 0.6s cubic-bezier(0.55, 0.085, 0.68, 0.53), opacity 0.5s';
+                el.style.transform = `translate(${randomX}px, ${randomY}px) rotate(${randomRot}deg) scale(0)`;
+                el.style.opacity = '0';
+            });
+
+            // 2. Wyłącz dźwięk drastycznie
+            oscillators.forEach(osc => {
+                try { osc.stop(); } catch(e) {}
+            });
+            if (audioCtx) {
+                audioCtx.close();
+            }
+
+            // 3. Pokazanie ekranu końcowego
+            const endScreen = document.getElementById('end-screen');
+            endScreen.style.zIndex = "999";
+            
+            setTimeout(() => {
+                document.getElementById('app-container').style.display = 'none';
+                endScreen.style.opacity = '1';
+            }, 600);
+        }
+    </script>
+</body>
+</html>
