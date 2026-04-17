@@ -3,271 +3,740 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Void-Tok</title>
+    <title>Galaktyczna Ewolucja</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background-color: #000;
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            overflow: hidden; /* Blokujemy standardowe przewijanie */
-        }
-
-        /* Ekran startowy (wymagany by odblokować Audio API) */
-        #start-screen {
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-            z-index: 9999;
-            cursor: pointer;
-        }
-        #start-screen h1 { font-size: 24px; letter-spacing: 2px; text-transform: uppercase; animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
-
-        /* Kontener aplikacji - scroll snap */
-        #app-container {
-            width: 100vw;
-            height: 100vh;
-            overflow-y: scroll;
-            scroll-snap-type: y mandatory;
-            scrollbar-width: none; /* Ukrywa pasek w Firefox */
-            transition: all 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-        }
-        #app-container::-webkit-scrollbar { display: none; } /* Ukrywa pasek w Chrome/Safari */
-
-        /* Pojedyncza Rolka */
-        .slide {
-            width: 100vw;
-            height: 100vh;
-            scroll-snap-align: start;
-            position: relative;
-            background: #111;
-        }
-
-        /* Szum wizualny */
-        canvas.visuals {
+        html, body {
             width: 100%;
             height: 100%;
-            object-fit: cover;
-            /* Niska rozdzielczość canvasu skalowana w górę daje fajny, glitchowy efekt */
-            image-rendering: pixelated; 
+            overflow: hidden;
+            background: #02030a;
+            color: #dbe6ff;
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         }
-
-        /* Interfejs w stylu TikToka */
-        .ui-overlay {
-            position: absolute;
-            bottom: 20px;
-            right: 15px;
-            display: flex;
-            flex-direction: column;
-            gap: 25px;
-            z-index: 10;
-        }
-        .icon {
-            font-size: 35px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-            cursor: pointer;
-            text-align: center;
-            transition: transform 0.2s;
-        }
-        .icon:active { transform: scale(0.8); }
-        .icon-label { font-size: 12px; font-weight: bold; margin-top: 5px; }
-
-        .text-overlay {
-            position: absolute;
-            bottom: 20px;
-            left: 15px;
-            width: 70%;
-            z-index: 10;
-            text-shadow: 1px 1px 3px rgba(0,0,0,0.8);
-        }
-        .username { font-weight: bold; font-size: 18px; margin-bottom: 8px; }
-        .description { font-size: 14px; opacity: 0.9; }
-
-        /* Ekran końcowy po zniszczeniu */
-        #end-screen {
+        canvas { display: block; width: 100%; height: 100%; }
+        .hud {
             position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: #000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            color: #fff;
-            opacity: 0;
+            left: 12px;
+            top: 12px;
+            padding: 10px 12px;
+            background: rgba(7, 10, 25, 0.6);
+            border: 1px solid rgba(140, 180, 255, 0.3);
+            border-radius: 10px;
+            font-size: 12px;
+            line-height: 1.5;
+            backdrop-filter: blur(5px);
+            max-width: min(390px, 95vw);
             pointer-events: none;
-            transition: opacity 2s ease-in;
-            z-index: -1;
+        }
+        .hint {
+            position: fixed;
+            bottom: 12px;
+            left: 12px;
+            font-size: 11px;
+            opacity: 0.85;
+            padding: 6px 10px;
+            background: rgba(3, 7, 20, 0.6);
+            border-radius: 8px;
+            border: 1px solid rgba(180, 210, 255, 0.2);
         }
     </style>
 </head>
 <body>
+<canvas id="canvas"></canvas>
+<div class="hud" id="hud"></div>
+<div class="hint">Kliknij: nowy mikoklan • Shift+klik: duży klan • Symulacja niedeterministyczna</div>
 
-    <div id="start-screen" onclick="initApp()">
-        <h1>Zacznij przewijać</h1>
-        <p style="margin-top: 10px; font-size: 12px; color: #666;">Dotknij ekranu</p>
-    </div>
+<script>
+(() => {
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const hud = document.getElementById('hud');
 
-    <div id="app-container"></div>
+    let WIDTH = window.innerWidth;
+    let HEIGHT = window.innerHeight;
 
-    <div id="end-screen">Wróć do rzeczywistości.</div>
+    const rand = (a = 1, b = 0) => Math.random() * (a - b) + b;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const chance = p => Math.random() < p;
+    const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 
-    <script>
-        let audioCtx;
-        let oscillators = [];
-        let animationFrameIds = [];
-        let appDestroyed = false;
+    const agents = [];
+    const planets = [];
+    const clans = new Map();
+    let stars = [];
+    let frame = 0;
+    let clanCounter = 0;
+    let agentCounter = 0;
 
-        // Inicjalizacja aplikacji po pierwszym kliknięciu
-        function initApp() {
-            document.getElementById('start-screen').style.display = 'none';
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            loadMoreSlides(3); // Załaduj 3 pierwsze slajdy
-            setupInfiniteScroll();
+    const geneNames = ['intelligence', 'aggressionBase', 'fertility', 'adaptability', 'sociability', 'exploration'];
+
+    class Planet {
+        constructor(x, y) {
+            this.id = `P${Math.random().toString(36).slice(2, 7)}`;
+            this.x = x;
+            this.y = y;
+            this.coreRadius = rand(10, 6);
+            this.atmosphereMax = rand(34, 14);
+            this.maxEnergy = rand(700, 420);
+            this.energy = rand(this.maxEnergy * 0.9, this.maxEnergy * 0.45);
+            this.biosphere = rand(1.3, 0.7);
+            this.temperature = rand(1.25, 0.75);
+            this.regenRate = rand(2.4, 0.8);
+            this.reproBoost = rand(1.8, 1.1);
+            this.visitsByClan = new Map();
+            this.isMegastructure = false;
+            this.links = new Set();
+            this.pulse = rand(Math.PI * 2);
+            this.lastBattleHeat = 0;
         }
+    }
 
-        // Tworzenie pojedynczego slajdu
-        function createSlide() {
-            const slide = document.createElement('div');
-            slide.className = 'slide';
-
-            // Generowanie fałszywych nazw
-            const usernames = ["@pustka", "@glitch_mind", "@szum_informacyjny", "@błąd_systemu"];
-            const desc = ["nic tu nie ma.", "scrolluj dalej.", "szukasz czegoś?", "to nie ma sensu."];
-
-            slide.innerHTML = `
-                <canvas class="visuals" width="64" height="64"></canvas>
-                <div class="text-overlay">
-                    <div class="username">${usernames[Math.floor(Math.random() * usernames.length)]}</div>
-                    <div class="description">${desc[Math.floor(Math.random() * desc.length)]}</div>
-                </div>
-                <div class="ui-overlay">
-                    <div class="icon" onclick="shatterReality()">❤️<div class="icon-label">0</div></div>
-                    <div class="icon" onclick="shatterReality()">💬<div class="icon-label">0</div></div>
-                    <div class="icon" onclick="shatterReality()">🔖<div class="icon-label">0</div></div>
-                    <div class="icon" onclick="shatterReality()">↗️<div class="icon-label">0</div></div>
-                </div>
-            `;
-
-            document.getElementById('app-container').appendChild(slide);
-
-            const canvas = slide.querySelector('canvas');
-            animateCanvas(canvas);
+    class Agent {
+        constructor(x, y, clanId, genome, generation = 1) {
+            this.id = ++agentCounter;
+            this.x = x;
+            this.y = y;
+            this.vx = rand(2.2, -2.2);
+            this.vy = rand(2.2, -2.2);
+            this.clanId = clanId;
+            this.genome = genome;
+            this.generation = generation;
+            this.energy = rand(116, 70);
+            this.age = 0;
+            this.stability = 52;
+            this.planetAffinity = new Map();
+            this.memory = {
+                attacksSeen: 0,
+                successfulRaids: 0,
+                helpReceived: 0,
+                exploredWorlds: new Set(),
+                trauma: 0,
+                alliancesForged: 0,
+                lastAttackers: new Map()
+            };
+            this.faction = Math.random().toString(36).slice(2, 6);
+            this.size = 2.2 + genome.intelligence * 0.45;
+            this.goal = 'survive';
+            this.lastPlanetId = null;
+            this.cosmic = {
+                jumps: 0,
+                missions: 0
+            };
         }
+    }
 
-        // Proceduralne generowanie szumu na płótnie
-        function animateCanvas(canvas) {
-            if (appDestroyed) return;
-            const ctx = canvas.getContext('2d');
-            const w = canvas.width;
-            const h = canvas.height;
-            const id = ctx.createImageData(w, h);
-            const d = id.data;
-
-            // Losowy odcień dla danego slajdu
-            const rOffset = Math.random() * 255;
-            const gOffset = Math.random() * 255;
-            const bOffset = Math.random() * 255;
-
-            function draw() {
-                if (appDestroyed) return;
-                for (let i = 0; i < d.length; i += 4) {
-                    const noise = Math.random() * 255;
-                    d[i] = noise * (rOffset/255);     // R
-                    d[i+1] = noise * (gOffset/255);   // G
-                    d[i+2] = noise * (bOffset/255);   // B
-                    d[i+3] = 255;                     // Alpha
-                }
-                ctx.putImageData(id, 0, 0);
-                animationFrameIds.push(requestAnimationFrame(draw));
-            }
-            draw();
+    function createGenome(parentA = null, parentB = null, mutationBoost = 1) {
+        const g = {};
+        for (const key of geneNames) {
+            const base = parentA && parentB
+                ? (parentA[key] * rand(0.7, 0.35) + parentB[key] * rand(0.7, 0.35))
+                : rand(1.35, 0.55);
+            const nonlinearMutation = (Math.random() - 0.5) * Math.pow(rand(1.35, 0.1), 2) * 0.45 * mutationBoost;
+            g[key] = clamp(base + nonlinearMutation, 0.2, 2.2);
         }
-
-        // Generowanie niepokojącego dźwięku (Fale Gamma / Szum)
-        function playGlitchAudio() {
-            if (!audioCtx || appDestroyed) return;
-            
-            const osc = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            
-            // Losowa częstotliwość - dudnienie lub wysoki pisk
-            osc.frequency.value = Math.random() > 0.5 ? (30 + Math.random() * 40) : (400 + Math.random() * 1000);
-            osc.type = ['sine', 'square', 'sawtooth'][Math.floor(Math.random() * 3)];
-            
-            gainNode.gain.value = 0.05; // Cicho, żeby nie ogłuszyć
-            
-            osc.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            osc.start();
-            oscillators.push(osc);
-
-            // Zmień dźwięk co jakiś czas
-            setTimeout(() => {
-                if(!appDestroyed) {
-                    osc.stop();
-                    playGlitchAudio();
-                }
-            }, 1000 + Math.random() * 3000);
+        if (chance(0.05 * mutationBoost)) {
+            const k = pick(geneNames);
+            g[k] = clamp(g[k] * rand(1.35, 0.78), 0.2, 2.4);
         }
+        return g;
+    }
 
-        // Mechanizm nieskończonego przewijania
-        function loadMoreSlides(count) {
-            for (let i = 0; i < count; i++) {
-                createSlide();
-            }
-            // Uruchom nowy dźwięk przy każdym dodaniu slajdów (nawarstwianie się)
-            playGlitchAudio(); 
+    function initClan(id, hue, baseGenome = null) {
+        const civGene = baseGenome || createGenome();
+        clans.set(id, {
+            id,
+            color: `hsl(${hue}, 92%, 66%)`,
+            relations: new Map(),
+            memory: {
+                grievances: new Map(),
+                attackedBy: new Map(),
+                helpedBy: new Map(),
+                jointDefenseCounter: new Map(),
+                knownWorlds: new Set(),
+                historyScore: 0
+            },
+            factions: new Map(),
+            policies: {
+                ethics: clamp(0.45 + civGene.intelligence * 0.25, 0.15, 1.6),
+                militarism: clamp(0.65 + civGene.aggressionBase * 0.35, 0.1, 1.8),
+                expansionism: clamp(0.55 + civGene.exploration * 0.35, 0.1, 1.9),
+                protectorDrive: 0,
+                resourceNeed: clamp(0.5 + civGene.intelligence * 0.42, 0.3, 2.1)
+            },
+            tech: {
+                level: 1,
+                evolution: 0,
+                visitedWorlds: new Set(),
+                cosmicArchitecture: false
+            },
+            genomeTemplate: civGene,
+            warDoctrine: pick(['swarm', 'flank', 'raid']),
+            allies: new Set()
+        });
+    }
+
+    function spawnClan(x, y, count = 9, parentGenome = null) {
+        const id = clanCounter++;
+        const hue = (id * 137.508) % 360;
+        initClan(id, hue, parentGenome);
+        const template = clans.get(id).genomeTemplate;
+        for (let i = 0; i < count; i++) {
+            const g = createGenome(template, template, 0.85);
+            agents.push(new Agent(x + rand(24, -24), y + rand(24, -24), id, g));
         }
+    }
 
-        function setupInfiniteScroll() {
-            const container = document.getElementById('app-container');
-            container.addEventListener('scroll', () => {
-                if (container.scrollTop + container.clientHeight >= container.scrollHeight - 100) {
-                    loadMoreSlides(1);
-                }
+    function createStars() {
+        stars = [];
+        for (let i = 0; i < 420; i++) {
+            stars.push({ x: rand(WIDTH), y: rand(HEIGHT), z: rand(2.2, 0.3), t: rand(0.04, 0.003) });
+        }
+    }
+
+    function createPlanets(count = 15) {
+        for (let i = 0; i < count; i++) {
+            planets.push(new Planet(rand(WIDTH - 80, 80), rand(HEIGHT - 80, 80)));
+        }
+        buildGalaxyGraph();
+    }
+
+    function buildGalaxyGraph() {
+        for (const p of planets) p.links.clear();
+        for (let i = 0; i < planets.length; i++) {
+            const p = planets[i];
+            const distances = planets
+                .map((q, qi) => ({ qi, d: Math.hypot(q.x - p.x, q.y - p.y) }))
+                .filter(v => v.qi !== i)
+                .sort((a, b) => a.d - b.d)
+                .slice(0, 3 + Math.floor(Math.random() * 2));
+            distances.forEach(v => {
+                p.links.add(v.qi);
+                planets[v.qi].links.add(i);
             });
         }
+    }
 
-        // THE SHATTER EFFECT - Główna mechanika zniszczenia
-        function shatterReality() {
-            if (appDestroyed) return;
-            appDestroyed = true;
+    function getRelation(a, b) {
+        const ca = clans.get(a);
+        if (!ca) return 0;
+        return ca.relations.get(b) || 0;
+    }
 
-            // 1. Zniszcz UI i Canvany (wybuch na boki)
-            const elements = document.querySelectorAll('.icon, .text-overlay, canvas');
-            elements.forEach(el => {
-                const randomX = (Math.random() - 0.5) * 2000;
-                const randomY = (Math.random() - 0.5) * 2000;
-                const randomRot = (Math.random() - 0.5) * 720;
-                
-                el.style.transition = 'transform 0.6s cubic-bezier(0.55, 0.085, 0.68, 0.53), opacity 0.5s';
-                el.style.transform = `translate(${randomX}px, ${randomY}px) rotate(${randomRot}deg) scale(0)`;
-                el.style.opacity = '0';
-            });
+    function changeRelation(a, b, delta) {
+        if (!clans.has(a) || !clans.has(b) || a === b) return;
+        const ca = clans.get(a);
+        const cb = clans.get(b);
+        const ra = clamp((ca.relations.get(b) || 0) + delta, -120, 120);
+        const rb = clamp((cb.relations.get(a) || 0) + delta * rand(1.15, 0.82), -120, 120);
+        ca.relations.set(b, ra);
+        cb.relations.set(a, rb);
+        if (ra > 66 && rb > 60) {
+            ca.allies.add(b); cb.allies.add(a);
+        } else if (ra < 18 || rb < 18) {
+            ca.allies.delete(b); cb.allies.delete(a);
+        }
+    }
 
-            // 2. Wyłącz dźwięk drastycznie
-            oscillators.forEach(osc => {
-                try { osc.stop(); } catch(e) {}
-            });
-            if (audioCtx) {
-                audioCtx.close();
+    function clanStats() {
+        const map = new Map();
+        for (const a of agents) {
+            if (!map.has(a.clanId)) {
+                map.set(a.clanId, {
+                    count: 0, intel: 0, aggression: 0, fertility: 0, exploration: 0,
+                    attackedNow: 0, victimizedBy: new Set(), onPlanets: new Map(), weak: false
+                });
+            }
+            const s = map.get(a.clanId);
+            s.count++;
+            s.intel += a.genome.intelligence;
+            s.aggression += a.genome.aggressionBase;
+            s.fertility += a.genome.fertility;
+            s.exploration += a.genome.exploration;
+        }
+        for (const [id, s] of map) {
+            s.intel /= Math.max(1, s.count);
+            s.aggression /= Math.max(1, s.count);
+            s.fertility /= Math.max(1, s.count);
+            s.exploration /= Math.max(1, s.count);
+            s.weak = s.count < 9;
+            const clan = clans.get(id);
+            if (clan) {
+                clan.policies.expansionism = clamp(0.45 + Math.log2(s.count + 1) * 0.3 + s.exploration * 0.3, 0.2, 2.3);
+                clan.policies.militarism = clamp(0.2 + (s.aggression * (1.7 - s.intel * 0.42)) + (s.count / 55), 0.05, 2.6);
+                clan.policies.resourceNeed = clamp(0.4 + s.intel * 0.6 + s.count / 90, 0.2, 2.8);
+                clan.policies.ethics = clamp(0.2 + s.intel * 0.55 - s.aggression * 0.25, 0.05, 2.1);
+                clan.policies.protectorDrive = clamp((clan.tech.level >= 8 ? 0.9 : 0) + clan.policies.ethics * 0.4, 0, 2);
+            }
+        }
+        return map;
+    }
+
+    function evolveCivilizations(statsMap) {
+        for (const [id, s] of statsMap) {
+            const clan = clans.get(id);
+            if (!clan) continue;
+            const worldBonus = Math.pow(clan.tech.visitedWorlds.size + 1, 0.62);
+            const baseGain = 0.02 + s.intel * 0.018 + s.exploration * 0.01;
+            clan.tech.evolution += baseGain * worldBonus;
+            if (clan.tech.evolution > clan.tech.level * 2.1) {
+                clan.tech.level += 1;
+                clan.tech.evolution *= 0.52;
+            }
+            if (clan.tech.level >= 10 && !clan.tech.cosmicArchitecture) {
+                clan.tech.cosmicArchitecture = true;
+            }
+        }
+    }
+
+    function updateAlliancesFromThreat(statsMap) {
+        const clansArr = [...statsMap.keys()];
+        for (let i = 0; i < clansArr.length; i++) {
+            for (let j = i + 1; j < clansArr.length; j++) {
+                const a = clansArr[i], b = clansArr[j];
+                const sa = statsMap.get(a), sb = statsMap.get(b);
+                if (!sa || !sb) continue;
+                const ca = clans.get(a), cb = clans.get(b);
+                if (!ca || !cb) continue;
+
+                const commonAggressor = [...sa.victimizedBy].find(v => sb.victimizedBy.has(v));
+                if (commonAggressor && sa.weak && sb.weak) {
+                    changeRelation(a, b, rand(4.5, 1.8));
+                    ca.memory.jointDefenseCounter.set(b, (ca.memory.jointDefenseCounter.get(b) || 0) + 1);
+                    cb.memory.jointDefenseCounter.set(a, (cb.memory.jointDefenseCounter.get(a) || 0) + 1);
+                }
+
+                const bullyPressure = (sa.count + sb.count) < 26 && commonAggressor ? 0.7 : 0;
+                if (bullyPressure > 0.4 && chance(0.06)) {
+                    changeRelation(a, b, rand(9, 5));
+                }
+            }
+        }
+    }
+
+    function maybeSpawnMegastructure(clanId) {
+        const clan = clans.get(clanId);
+        if (!clan || !clan.tech.cosmicArchitecture) return;
+        if (!chance(0.0025 + clan.policies.expansionism * 0.0008)) return;
+        const anchor = pick(planets);
+        const mega = new Planet(
+            clamp(anchor.x + rand(180, -180), 60, WIDTH - 60),
+            clamp(anchor.y + rand(180, -180), 60, HEIGHT - 60)
+        );
+        mega.isMegastructure = true;
+        mega.maxEnergy *= 1.9;
+        mega.energy = mega.maxEnergy * 0.75;
+        mega.reproBoost = 2.4;
+        mega.atmosphereMax *= 1.6;
+        planets.push(mega);
+        buildGalaxyGraph();
+    }
+
+    function strategicTarget(agent, currentPlanet, statsMap) {
+        const clan = clans.get(agent.clanId);
+        if (!clan || !currentPlanet) return null;
+        const links = [...currentPlanet.links].map(i => planets[i]).filter(Boolean);
+        if (!links.length) return null;
+
+        let best = null;
+        let bestScore = -Infinity;
+        for (const p of links) {
+            const energyScore = (p.energy / p.maxEnergy) * clan.policies.resourceNeed;
+            const novelty = agent.memory.exploredWorlds.has(p.id) ? -0.2 : 0.55;
+            const habitability = p.biosphere * p.reproBoost;
+            let threat = 0;
+            for (const other of agents) {
+                if (other.clanId === agent.clanId) continue;
+                if (Math.hypot(other.x - p.x, other.y - p.y) < p.coreRadius + 28) {
+                    const otherStat = statsMap.get(other.clanId);
+                    if (otherStat) threat += otherStat.count * otherStat.aggression * 0.012;
+                }
+            }
+            const ethicsProtect = clan.policies.protectorDrive > 0.8 && threat > 0.7 ? 0.35 : 0;
+            const warBias = clan.warDoctrine === 'raid' ? rand(0.2, -0.15) : 0;
+            const score = energyScore + novelty + habitability - threat + ethicsProtect + warBias + rand(0.2, -0.2);
+            if (score > bestScore) {
+                bestScore = score;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    function splitIntoFactions(agent, sameClanNear) {
+        const clan = clans.get(agent.clanId);
+        if (!clan || sameClanNear < 14) return;
+        const factionPressure = (2 - clan.policies.ethics) * 0.003 + (sameClanNear / 2500);
+        if (chance(factionPressure)) {
+            agent.faction = Math.random().toString(36).slice(2, 6);
+            clan.factions.set(agent.faction, (clan.factions.get(agent.faction) || 0) + 1);
+        }
+        if (chance(0.0008) && clan.factions.size > 6) {
+            const newClanGenome = createGenome(agent.genome, clan.genomeTemplate, 1.3);
+            spawnClan(agent.x + rand(14, -14), agent.y + rand(14, -14), 5, newClanGenome);
+            agent.energy *= 0.65;
+        }
+    }
+
+    function update() {
+        frame++;
+        const statsMap = clanStats();
+        evolveCivilizations(statsMap);
+        updateAlliancesFromThreat(statsMap);
+
+        for (const p of planets) {
+            p.lastBattleHeat *= 0.95;
+            p.pulse += 0.028;
+        }
+
+        for (let i = 0; i < agents.length; i++) {
+            const a = agents[i];
+            const clan = clans.get(a.clanId);
+            if (!clan) continue;
+            a.age++;
+
+            let sepX = 0, sepY = 0, cohX = 0, cohY = 0, alX = 0, alY = 0;
+            let sameCount = 0;
+            let enemyCount = 0;
+            let attackedThisFrame = false;
+
+            const st = statsMap.get(a.clanId);
+            const popCount = st ? st.count : 1;
+            const largeClanExpansion = clamp(Math.log2(popCount + 1) * 0.32, 0.1, 1.8);
+            const smallClanSurvival = clamp(1.5 - Math.log2(popCount + 1) * 0.28, 0.25, 1.6);
+
+            let nearestPlanet = null;
+            let nearestPlanetDist = Infinity;
+
+            for (const p of planets) {
+                const d = Math.hypot(a.x - p.x, a.y - p.y);
+                if (d < nearestPlanetDist) {
+                    nearestPlanetDist = d;
+                    nearestPlanet = p;
+                }
             }
 
-            // 3. Pokazanie ekranu końcowego
-            const endScreen = document.getElementById('end-screen');
-            endScreen.style.zIndex = "999";
-            
-            setTimeout(() => {
-                document.getElementById('app-container').style.display = 'none';
-                endScreen.style.opacity = '1';
-            }, 600);
+            for (let j = 0; j < agents.length; j++) {
+                if (i === j) continue;
+                const b = agents[j];
+                const dx = b.x - a.x;
+                const dy = b.y - a.y;
+                const distSq = dx * dx + dy * dy;
+                if (distSq > 120 * 120 || distSq === 0) continue;
+                const dist = Math.sqrt(distSq);
+
+                if (a.clanId === b.clanId) {
+                    cohX += b.x; cohY += b.y;
+                    alX += b.vx; alY += b.vy;
+                    sameCount++;
+                    if (dist < 12) {
+                        const f = (12 - dist) / dist;
+                        sepX -= dx * f;
+                        sepY -= dy * f;
+                    }
+                } else {
+                    enemyCount++;
+                    const rel = getRelation(a.clanId, b.clanId);
+                    const bStats = statsMap.get(b.clanId);
+                    const stupidityAggression = bStats ? bStats.count * clamp(1.4 - bStats.intel * 0.52, 0.35, 1.5) : 1;
+                    const aggression = clamp((a.genome.aggressionBase * (1.5 - a.genome.intelligence * 0.4)) + (stupidityAggression * 0.01), 0.08, 2.2);
+
+                    if (dist < 17) {
+                        const aggressionFactor = rel > 55 ? 0.15 : aggression;
+                        a.energy -= aggressionFactor * rand(1.25, 0.35);
+                        if (chance(0.11 * aggressionFactor)) {
+                            attackedThisFrame = true;
+                            a.memory.attacksSeen++;
+                            a.memory.trauma += 0.3;
+                            st && st.victimizedBy.add(b.clanId);
+                            clan.memory.grievances.set(b.clanId, (clan.memory.grievances.get(b.clanId) || 0) + 1);
+                            changeRelation(a.clanId, b.clanId, -rand(3.5, 1.2));
+                            if (dist < 9 && chance(0.08 + aggressionFactor * 0.04)) {
+                                if (chance(0.45)) {
+                                    a.clanId = b.clanId;
+                                } else {
+                                    b.clanId = a.clanId;
+                                }
+                            }
+                            if (nearestPlanet) nearestPlanet.lastBattleHeat += 0.45;
+                        } else {
+                            changeRelation(a.clanId, b.clanId, rand(0.35, 0.08));
+                        }
+                    }
+
+                    if (dist < 40) {
+                        const rep = rel > 60 ? -0.03 : 0.12 + aggression * 0.05;
+                        sepX -= dx * rep;
+                        sepY -= dy * rep;
+                    }
+                }
+            }
+
+            if (sameCount > 0) {
+                a.vx += ((cohX / sameCount) - a.x) * 0.003 * a.genome.sociability;
+                a.vy += ((cohY / sameCount) - a.y) * 0.003 * a.genome.sociability;
+                a.vx += ((alX / sameCount) - a.vx) * 0.016;
+                a.vy += ((alY / sameCount) - a.vy) * 0.016;
+            }
+            a.vx += sepX * 0.06;
+            a.vy += sepY * 0.06;
+
+            if (nearestPlanet) {
+                const dx = nearestPlanet.x - a.x;
+                const dy = nearestPlanet.y - a.y;
+                const dist = Math.hypot(dx, dy);
+                const atmos = nearestPlanet.coreRadius + nearestPlanet.atmosphereMax * (nearestPlanet.energy / nearestPlanet.maxEnergy) + 18;
+
+                if (dist < atmos) {
+                    const pull = clamp((atmos - dist) / atmos, 0, 1);
+                    a.vx += dx * pull * 0.008 * (0.75 + a.genome.exploration * 0.4);
+                    a.vy += dy * pull * 0.008 * (0.75 + a.genome.exploration * 0.4);
+                    if (dist < nearestPlanet.coreRadius + 13) {
+                        const gather = 0.85 + a.genome.adaptability * 0.8;
+                        const mined = Math.min(nearestPlanet.energy, gather * 0.92);
+                        nearestPlanet.energy -= mined;
+                        a.energy += mined * 0.62;
+                        nearestPlanet.visitsByClan.set(a.clanId, (nearestPlanet.visitsByClan.get(a.clanId) || 0) + 1);
+
+                        const visitCount = nearestPlanet.visitsByClan.get(a.clanId);
+                        if (visitCount % 12 === 0) {
+                            clan.tech.visitedWorlds.add(nearestPlanet.id);
+                            a.memory.exploredWorlds.add(nearestPlanet.id);
+                        }
+
+                        const reproOnPlanet = 0.01 * nearestPlanet.reproBoost * a.genome.fertility * smallClanSurvival;
+                        if (a.energy > 70 && chance(reproOnPlanet)) {
+                            const babyGenome = createGenome(a.genome, clan.genomeTemplate, 1 + clan.tech.visitedWorlds.size * 0.02);
+                            const baby = new Agent(a.x + rand(8, -8), a.y + rand(8, -8), a.clanId, babyGenome, a.generation + 1);
+                            baby.energy = rand(72, 52);
+                            agents.push(baby);
+                            a.energy *= 0.88;
+                        }
+                    }
+                }
+
+                if (clan.tech.level > 4 && chance(0.0018 * largeClanExpansion * a.genome.exploration)) {
+                    const target = strategicTarget(a, nearestPlanet, statsMap);
+                    if (target) {
+                        const jumpers = agents
+                            .filter(u => u.clanId === a.clanId && Math.hypot(u.x - a.x, u.y - a.y) < 34)
+                            .slice(0, Math.max(2, Math.floor(3 + clan.tech.level * 0.35)));
+                        for (const unit of jumpers) {
+                            unit.x = target.x + rand(25, -25);
+                            unit.y = target.y + rand(25, -25);
+                            unit.energy *= 0.9;
+                            unit.cosmic.jumps++;
+                            unit.cosmic.missions++;
+                            unit.memory.exploredWorlds.add(target.id);
+                        }
+                    }
+                }
+            }
+
+            const explorationPush = clan.policies.expansionism * 0.08 + a.genome.exploration * 0.07;
+            a.vx += rand(explorationPush, -explorationPush);
+            a.vy += rand(explorationPush, -explorationPush);
+
+            const maxSpeed = 2.2 + a.genome.exploration * 0.5 + clan.tech.level * 0.03;
+            const speed = Math.hypot(a.vx, a.vy);
+            if (speed > maxSpeed) {
+                a.vx = (a.vx / speed) * maxSpeed;
+                a.vy = (a.vy / speed) * maxSpeed;
+            }
+
+            a.x += a.vx;
+            a.y += a.vy;
+
+            if (a.x < 0 || a.x > WIDTH) { a.vx *= -0.82; a.x = clamp(a.x, 4, WIDTH - 4); }
+            if (a.y < 0 || a.y > HEIGHT) { a.vy *= -0.82; a.y = clamp(a.y, 4, HEIGHT - 4); }
+
+            const resourceNeed = clan.policies.resourceNeed;
+            const metabolism = 0.056 + resourceNeed * 0.02 + (enemyCount > 0 ? 0.02 : 0) + (a.age / 120000);
+            a.energy -= metabolism;
+            if (attackedThisFrame) a.energy -= 0.25;
+
+            if (!attackedThisFrame && enemyCount === 0) {
+                a.stability = clamp(a.stability + 0.22, 0, 100);
+                a.memory.trauma *= 0.992;
+            }
+
+            splitIntoFactions(a, sameCount);
+
+            if (a.energy > 96 && sameCount > 2 && chance(0.004 * a.genome.fertility * smallClanSurvival)) {
+                const mate = agents.find(other => other !== a && other.clanId === a.clanId && Math.hypot(other.x - a.x, other.y - a.y) < 24);
+                if (mate) {
+                    const babyGenome = createGenome(a.genome, mate.genome, 1 + clan.tech.level * 0.01);
+                    agents.push(new Agent(a.x + rand(10, -10), a.y + rand(10, -10), a.clanId, babyGenome, Math.max(a.generation, mate.generation) + 1));
+                    a.energy *= 0.9;
+                    mate.energy *= 0.92;
+                }
+            }
         }
-    </script>
+
+        agents.splice(0, agents.length, ...agents.filter(a => a.energy > 0 && a.age < 22000));
+
+        for (const p of planets) {
+            const regen = p.isMegastructure ? 4.5 : p.regenRate;
+            p.energy = clamp(p.energy + regen * (p.lastBattleHeat > 1 ? 0.65 : 1.25), 35, p.maxEnergy);
+        }
+
+        if (planets.length < 24 && chance(0.009)) {
+            planets.push(new Planet(rand(WIDTH - 60, 60), rand(HEIGHT - 60, 60)));
+            buildGalaxyGraph();
+        }
+
+        for (const [id] of clanStats()) {
+            maybeSpawnMegastructure(id);
+        }
+
+        if (frame % 8 === 0) updateHud();
+    }
+
+    function drawGalaxyGraph() {
+        ctx.save();
+        ctx.globalAlpha = 0.17;
+        ctx.strokeStyle = '#7a9bff';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < planets.length; i++) {
+            const p = planets[i];
+            for (const j of p.links) {
+                if (j < i) continue;
+                const q = planets[j];
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(q.x, q.y);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+    }
+
+    function draw() {
+        const bg = ctx.createLinearGradient(0, 0, WIDTH * 0.4, HEIGHT);
+        bg.addColorStop(0, '#050712');
+        bg.addColorStop(1, '#181228');
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, WIDTH, HEIGHT);
+
+        const t = performance.now() * 0.0013;
+        for (const s of stars) {
+            ctx.globalAlpha = clamp(0.25 + Math.sin((t + s.x) * s.t * 35) * 0.75, 0.15, 0.95);
+            ctx.fillStyle = '#f5faff';
+            ctx.fillRect(s.x, s.y, s.z, s.z);
+        }
+        ctx.globalAlpha = 1;
+
+        drawGalaxyGraph();
+
+        for (const p of planets) {
+            const dep = p.energy / p.maxEnergy;
+            const atmos = p.coreRadius + p.atmosphereMax * dep;
+            ctx.save();
+            ctx.globalAlpha = 0.32 * dep;
+            ctx.fillStyle = p.isMegastructure ? '#ffd79f' : '#7ac5ff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, atmos * 1.15, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.globalAlpha = 0.95;
+            ctx.fillStyle = p.isMegastructure ? '#ffe7ba' : '#d9ecff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.coreRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = p.isMegastructure ? '#ffb85b' : '#96d3ff';
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.coreRadius * 0.45, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        for (const a of agents) {
+            const clan = clans.get(a.clanId);
+            ctx.fillStyle = clan ? clan.color : '#fff';
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, a.size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 0.45;
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(a.x - 0.8, a.y - 0.8, 1.6, 1.6);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function updateHud() {
+        const aliveClans = [...new Set(agents.map(a => a.clanId))];
+        const lines = [];
+        lines.push(`<b>Galaktyczna Ewolucja</b>`);
+        lines.push(`Klatka: ${frame.toLocaleString('pl-PL')}`);
+        lines.push(`Populacja: ${agents.length}`);
+        lines.push(`Planety/węzły: ${planets.length}`);
+        lines.push(`Aktywne klany: ${aliveClans.length}`);
+
+        const top = [...aliveClans]
+            .map(id => {
+                const members = agents.filter(a => a.clanId === id);
+                const clan = clans.get(id);
+                const avgIntel = members.reduce((s, a) => s + a.genome.intelligence, 0) / Math.max(1, members.length);
+                return { id, count: members.length, lvl: clan ? clan.tech.level : 1, mega: clan?.tech.cosmicArchitecture, intel: avgIntel };
+            })
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 4);
+
+        for (const t of top) {
+            lines.push(`Klan ${t.id}: ${t.count} | IQ ${t.intel.toFixed(2)} | evo ${t.lvl}${t.mega ? ' | megastruktury' : ''}`);
+        }
+
+        hud.innerHTML = lines.join('<br>');
+    }
+
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    function resize() {
+        WIDTH = window.innerWidth;
+        HEIGHT = window.innerHeight;
+        canvas.width = WIDTH;
+        canvas.height = HEIGHT;
+        createStars();
+        for (const p of planets) {
+            p.x = clamp(p.x, 60, WIDTH - 60);
+            p.y = clamp(p.y, 60, HEIGHT - 60);
+        }
+        buildGalaxyGraph();
+    }
+
+    function onCreateClan(e) {
+        const rect = canvas.getBoundingClientRect();
+        const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
+        const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
+        const count = e.shiftKey ? 18 : 7;
+        spawnClan(x, y, count);
+    }
+
+    function init() {
+        resize();
+        createPlanets(16);
+        spawnClan(WIDTH * 0.24, HEIGHT * 0.36, 11);
+        spawnClan(WIDTH * 0.68, HEIGHT * 0.61, 10);
+        spawnClan(WIDTH * 0.44, HEIGHT * 0.22, 8);
+
+        canvas.addEventListener('mousedown', onCreateClan);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            onCreateClan(e);
+        }, { passive: false });
+        window.addEventListener('resize', resize);
+
+        updateHud();
+        loop();
+    }
+
+    init();
+})();
+</script>
 </body>
 </html>
